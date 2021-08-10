@@ -1,17 +1,19 @@
 library(tidyverse)
 library(shiny)
+library(cowplot)
+library(viridis)
 
 ##### assume input is multi-year file with assessment year specified in column ####
 
-data2 <- read_csv("Data/Example_input_data2.csv")
-valid2 <- read_csv("Data/Example_derived_data2.csv", 
-                   col_types = cols(X10 = col_skip(), X11 = col_skip()))
+#data2 <- read_csv("Data/Example_input_data2.csv")
+#valid2 <- read_csv("Data/Example_derived_data2.csv", 
+                   # col_types = cols(X10 = col_skip(), X11 = col_skip()))
 
 # test dataset
-input1 <- valid2 %>% select(Assessment_Year, FireYear, starts_with("ObsArea")) %>% 
-  filter(ObsArea_Whole > 0) %>% 
-  setNames(c("Assessment_Year", "LastFire", "ObsArea_Whole", "ObsArea_Subset")) %>% 
-  mutate(LastFire = as.numeric(ifelse(LastFire == "Unknown", 0, LastFire)))
+#input1 <- valid2 %>% select(Assessment_Year, FireYear, starts_with("ObsArea")) %>% 
+#  filter(ObsArea_Whole > 0) %>% 
+#  setNames(c("Assessment_Year", "LastFire", "ObsArea_Whole", "ObsArea_Subset")) %>% 
+#  mutate(LastFire = as.numeric(ifelse(LastFire == "Unknown", 0, LastFire)))
 
 
 ###### Shiny app ##########
@@ -34,21 +36,43 @@ TSLF_intervals <- function(dat, tslf){
   return(geointervals)
 }
 
+fix_names <- function(chr){
+  strsplit(chr, split = "_") %>% 
+    reduce(rbind) %>% data.frame() %>% 
+    select_if(~n_distinct(.x)>1) %>% 
+    apply(1, paste, collapse = "_") %>% 
+    setNames(chr)
+}
+
 ### User interface 
 ui <- fluidPage(
-  fileInput(inputId = "data", label = "Choose file", multiple = FALSE, accept = c(".csv")), 
-
-  numericInput("tslfMIN", "Min TSLF", value = 6),
-  numericInput("tslfMEAN", "Mean TSLF", value = 7),
-  numericInput("tslfMAX", "Max TSLF", value = 15),
-  
-  
-  plotOutput(outputId = "freqCurves", width = "700px", height = "400px"),
-  plotOutput(outputId = "areaGraph", width = "700px", height = "400px"),
-  tableOutput(outputId = "outTableB"),
-  tableOutput(outputId = "Summary"),
-  plotOutput(outputId = "ribbonPlot", width = "700px", height = "400px")
-
+  titlePanel("Ecosystem condition assessment fire metric"),
+  sidebarLayout(
+    sidebarPanel(
+      fileInput(inputId = "data", label = "please insert a csv file formatted according to specifications", multiple = FALSE, accept = c(".csv")), 
+      numericInput("tslfMIN", "Min TSLF", value = 6),
+      numericInput("tslfMEAN", "Mean TSLF", value = 7),
+      numericInput("tslfMAX", "Max TSLF", value = 15), 
+      width = 2),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Summaries",
+          fluidRow(
+          column(5, 
+                 plotOutput(outputId = "freqCurves", width = "500px", height = "600px")),
+          column(3, 
+                 tableOutput(outputId = "Summary")),
+          column(4, 
+                 plotOutput(outputId = "areaGraph", width = "500px", height = "280px"), 
+                 plotOutput(outputId = "ribbonPlot", width = "500px", height = "280px"))
+          )
+        ),
+        tabPanel("Detailed table", 
+          tableOutput(outputId = "outTableB"))
+        ),
+      width = 10), 
+    position = "left"
+ )
 )
 
 server <- function(input, output){
@@ -85,8 +109,10 @@ server <- function(input, output){
     dataInput1() %>% last() %>%  ## plot for most recent assessment year
       pivot_longer(cols = contains("Pct"), names_to = "variable") %>% 
       ggplot(aes(x = TSLF, y = value, col = variable)) + geom_line(lwd = 1.3) + 
-      labs(y = "Percent of ecosystem total extent") +
-      ggtitle("Frequency curves for most recent assessment year")
+      labs(y = "Percent of ecosystem extent") +
+      ggtitle("Frequency curves for most recent assessment year") + 
+      scale_color_manual(values = c("orange3", "orangered3", "red3" ,"midnightblue", "cyan4")) +
+      theme(plot.title = element_text(size = 16, face = "bold"), legend.position = c(.2, 0.85))
   })
   
   dataOutputB <- reactive({  ## calculate shortfalls
@@ -102,13 +128,17 @@ server <- function(input, output){
   
   
   output$outTableB <- renderTable ({
-    dataOutputB() %>% select(group, gi, interval, contains("Shortfall"))
+    dataOutputB() %>% select(group, gi, interval, contains("Shortfall")) %>%
+      rename_with(fix_names, contains("Shortfall")) %>%
+      separate(group, into = c("Year", "TSLF"))
      }, caption = "Shortfalls by tslf and assessment year")
   
   output$Summary <- renderTable ({
     dataOutputB() %>% select(group, gi, interval, contains("Shortfall")) %>% 
-      group_by(group) %>% summarise(across(contains("Shortfall"), sum))
-  }, caption = "Shortfall metric by tslf and assessment year")
+      group_by(group) %>% summarise(across(contains("Shortfall"), sum)) %>% 
+      separate(group, into = c("Year", "TSLF")) %>%
+      rename_with(fix_names, contains("Shortfall"))
+  }, caption = "Total shortfall metric by tslf and assessment year")
   
   
   output$areaGraph <- renderPlot({
@@ -120,11 +150,32 @@ server <- function(input, output){
       distinct(Year, gi, interval, name, value, .keep_all = TRUE) %>% 
       filter(!(name == "ExpectedArea" & Year != 2020))
     
-    ggplot(outC, aes(x = x, y = value, fill = as.factor(gi), group = TSLF)) + 
-      geom_col(width = 0.4) + 
+    p1 <- ggplot(outC %>% filter(name != "ExpectedArea"), aes(x = x, y = value, fill = as.factor(gi), group = TSLF)) + 
+      geom_col(width = 3) + 
       facet_grid(~name, scales = "free") +
       scale_fill_viridis(discrete = T, name = "", labels = unique(outC$interval), option = "B") +
-      labs(x = "TSLF Benchmark vs Observed year", y = "Percent burned (%)")
+      labs(x = "Observed year", y = "Percent burned (%)") + 
+      theme(plot.margin = unit(c(0.2, 0, 0.2, 0.2), "cm")) 
+    
+    p2 <- ggplot(outC %>% filter(name == "ExpectedArea"), aes(x = as.factor(x), y = value, fill = as.factor(gi), group = TSLF)) +
+      geom_col(width = 0.6) +
+      facet_grid(~name, scales = "free") +
+      scale_fill_viridis(discrete = T, name = "Interval", labels = unique(outC$interval), option = "B") +
+      labs(x = "TSLF Benchmark", y = "") + 
+      theme(plot.margin = unit(c(.2,.2,.2, 0), "cm"), axis.text.y = element_blank())
+    
+    title <- ggdraw() + 
+      draw_label(
+        "Observed and expected percent of areas burned",
+        size = 16,
+        fontface = 'bold',
+        x = 0,
+        hjust = -.1
+      )
+    plot_grid(title, 
+              plot_grid(p1 + theme(legend.position = "none"), p2, nrow = 1, rel_widths = c(3,2)),
+              ncol = 1,
+              rel_heights = c(0.1, 1)) 
     
   })
   
@@ -139,11 +190,7 @@ server <- function(input, output){
       pivot_wider(names_from = TSLF, values_from = value)
     if(n_distinct(outD$name)>1){
       outD <- outD %>% 
-        mutate(name = recode(name, !!!strsplit(unique(outD$name), split = "_") %>% 
-                               reduce(rbind) %>% data.frame() %>% 
-                               select_if(~n_distinct(.x)>1) %>% 
-                               apply(1, paste, collapse = "_") %>% 
-                               setNames(unique(outD$name))))
+        mutate(name = recode(name, !!!fix_names(unique(outD$name))))
     }
 
     ggplot(outD, aes(x = Year, fill = name)) + 
@@ -152,7 +199,9 @@ server <- function(input, output){
       geom_line(aes(y = Mean, col = name), lwd = 1) +
       labs(y = "Shortfall metric", x = "Year of condition assessment", fill = "", col = "") + 
       scale_fill_manual(values = c("midnightblue", "cyan4")) +
-      scale_color_manual(values = c("midnightblue", "cyan4"))
+      scale_color_manual(values = c("midnightblue", "cyan4")) +
+      ggtitle("Ecosystem total shortfall") + 
+      theme(plot.title = element_text(size = 16, face = "bold"))
     
     
   })
