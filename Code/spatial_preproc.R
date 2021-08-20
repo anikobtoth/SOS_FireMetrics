@@ -1,53 +1,68 @@
+## load packages
+#library(tidyverse)
+library(parallel)
+## load functions
+source("./Code/Helper_functions.R")
+
 ## spatial processing 
 
-library(rgdal)
-library(raster)
-library(sf)
-library(tidyverse)
+ecosystem <- st_read("../Spatialdata_forAniko/TECDist/TEC5", "NSWTEC5_ShaleSandSydney") 
+fire <- st_read("../Spatialdata_forAniko/FireNPWSHistory/firenpwsfirehistory", "Fire_NPWS_FireHistory") 
+assess_year <- c(2020, 2015, 2010, 2005, 2000)
+
+ncores <- min(length(assess_year), detectCores()) # ensure user's system is not overwhelmed
+
+# parallelise to make it faster
+cl <- makeCluster(ncores)
+clusterEvalQ(cl,c(source('./Code/Helper_Functions.R')))
+clusterExport(cl, c("fire", "ecosystem"))
+
+# This took about 10 minutes on my computer
+FireHist <- parLapply(cl, assess_year, function(x) firehistory(ecosystem, fire, x)) 
+FireHist <- bind_rows(FireHist)
+
+# To run subsets or multiple ecosystems, load new ecosystem shapefile and repeat. E.g.:
+    # ecosystem_subset <- st_read("path/name/here", "layer_name_here") 
+    # FireHist_subset <- parLapply(cl, assess_year, function(x) firehistory(ecosystem_subset, fire, x)) 
+    # FireHist_subset <- bind_rows(FireHist_subset)
+
+# Join into one table with ecosystems or subsets as columns
+    # FireHist <- full_join(FireHist, FireHist_subset, by = c("LastFire", "Assessment_Year"), suffix = c("_Full", "_Subset")) 
+
+# for a large number of ecosystems, could write a loop or helper function
+
+## save as .csv to use with Shiny app
+write_csv(FireHist, "./Input_data.csv")
+
+# **** Input data MUST have columns "LastFire" and "Assessment_Year" as output by this code. *****
+# **** Ecosystem area columns MUST contain "ObsArea" (can be prefix or suffix, doesn't matter) ****
 
 
-ecosystem <- st_read("../Spatialdata_forAniko/TECDist/TEC5", "NSWTEC5_ShaleSandSydney") %>% 
-  st_transform(st_crs(AEA_Aus))
-fire <- st_read("../Spatialdata_forAniko/FireNPWSHistory/firenpwsfirehistory", "Fire_NPWS_FireHistory") %>%
-  st_transform(st_crs(AEA_Aus))
-assess_year <- 2020
+### Metric calculations #####
 
-st_erase <- function(x, y) st_difference(x, st_union(st_combine(y) %>% st_make_valid()))
+tslf <- c(MIN = 6, MEAN = 7, MAX = 15) # Must be named
 
-firehistory <- function(ecosystem, fire, assess_year){
-  # Australian albers EA projection
-  AEA_Aus <- "+proj=aea +lat_1=-18 +lat_2=-36 +lat_0=0 +lon_0=132 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-  
-  ecosystem <- st_transform(ecosystem, st_crs(AEA_Aus)) %>% # transform
-    st_make_valid() %>% st_union()                          # validate and lump to one multipolygon
-  
-  fire <- st_transform(fire, st_crs(AEA_Aus)) %>% # transform
-    st_make_valid() %>%                           # Validate
-    st_crop(st_bbox(ecosystem)) %>%               # crop to ecosystem extent
-    mutate(FireAge = substr(Label, 0, 4)) %>%     # Add fireAge
-    group_by(FireAge) %>%                         # union polygons from same fireAge
-    summarize(geometry = st_union(geometry)) %>%
-    sp_identity(keep_cols = "FireAge")
-  
-  curr_fire <- fire %>% filter(FireAge < assess_year)
-  
-  IDFireHist <- st_intersection(curr_fire, ecosystem) %>% st_intersection() #%>% st_union(by_feature = TRUE)
-  IDFireHist <- IDFireHist %>%
-    mutate(Area = st_area(IDFireHist)) %>% 
-    filter(as.numeric(Area) > 0) %>%
-    mutate(fgeom = geometry %>% as.character %>% as.factor %>% as.numeric)
-  
-  #IDFireHist$Area <- st_area(IDFireHist)
-  #IDFireHist <- IDFireHist %>% filter(as.numeric(Area) > 0)
-  #IDFireHist$fgeom <- IDFireHist$geometry %>% as.character() %>% as.factor() %>% as.numeric()
-  
-  test <- IDFireHist %>% group_by(fgeom, Area) %>% summarise(mostRecentFire = max(FireAge), n = n())
-  test2 <- test %>% data.frame() %>% group_by(mostRecentFire) %>% summarise(Areakm2 = sum(Area)/1000000)
-  
-  #unburned <- st_difference(TEC, curr_fire)
-}
+dat <- expected_fire(FireHist, tslf) # obs and expected percentages
 
+shf <- shortfalls(dat, tslf) # shortfalls
 
+# detailed table (throws warning if only one observed column was input)
+shf %>% select(group, gi, interval, contains("Shortfall")) %>%
+  rename_with(fix_names, contains("Shortfall")) %>%
+  separate(group, into = c("Year", "TSLF"))
 
+# summary shortfall metric table
+shf %>% select(group, gi, interval, contains("Shortfall")) %>% 
+  group_by(group) %>% summarise(across(contains("Shortfall"), sum)) %>% 
+  separate(group, into = c("Year", "TSLF")) %>%
+  rename_with(fix_names, contains("Shortfall"))
 
+# Plot frequency curves
+freq_curves(dat, yr = 2015)
+
+# Plot area graph 
+area_graph(shf)
+
+# Ribbon plot (currently handles up to 5 observed columns)
+ribbon_plot(shf)
 
