@@ -5,20 +5,11 @@ library(viridis)
 
 ##### assume input is multi-year file with assessment year specified in column ####
 
-#data2 <- read_csv("Data/Example_input_data2.csv")
-#valid2 <- read_csv("Data/Example_derived_data2.csv", 
-                   # col_types = cols(X10 = col_skip(), X11 = col_skip()))
-
-# test dataset
-#input1 <- valid2 %>% select(Assessment_Year, FireYear, starts_with("ObsArea")) %>% 
-#  filter(ObsArea_Whole > 0) %>% 
-#  setNames(c("Assessment_Year", "LastFire", "ObsArea_Whole", "ObsArea_Subset")) %>% 
-#  mutate(LastFire = as.numeric(ifelse(LastFire == "Unknown", 0, LastFire)))
-
+# Use Expected_data_input.csv for input data
 
 ###### Shiny app ##########
 
-## Global 
+## Global functions ####
 TSLF_intervals <- function(dat, tslf){
   GI <- rep(1:10, 2^(seq(0,9)))[1:nrow(dat)]
   intervals <- rep(paste(c("", which(diff(GI)>0)+1), c(which(diff(GI)>0),""), sep = "-") %>% str_replace("^-", "") %>% str_replace("-$", "+"), times = table(GI))
@@ -31,7 +22,7 @@ TSLF_intervals <- function(dat, tslf){
     summarise(across(contains("Area"), sum)) %>%
     mutate(across(contains("Obs"), list(d = ~ExpectedArea-.x))) %>% 
     mutate(across(ends_with("_d"), list(Shortfall = ~ifelse(.x < 0, 0, .x)))) %>%
-    mutate(group = paste(dat$Assessment_Year[1], tslf, sep = "_"))
+    mutate(group = paste(dat$yrofas[1], tslf, sep = "_"))
   
   return(geointervals)
 }
@@ -79,14 +70,10 @@ server <- function(input, output){
   
   dataInput1 <- reactive({  ## reads in the data and combines into one table
     req(input$data)
-    #raw <- input$data %>% apply(1, function(x) read_csv(x["datapath"])) %>% 
-    raw <- input$data$datapath[1] %>% read_csv() %>%
+      raw <- input$data$datapath[1] %>% read_csv() %>%
       group_by(Assessment_Year) %>% group_split() %>%
        map(mutate, across(contains("Area"), list(Pct = ~100*.x/sum(.x))))
-    
-    
-     #raw <- split(raw, raw$Assessment_Year) 
-     
+
      oldestyr <- 1950
     
     calc1 <- list()
@@ -94,11 +81,11 @@ server <- function(input, output){
       yoa <- raw[[i]]$Assessment_Year[1]
       raw[[i]] <- raw[[i]] %>% mutate(LastFire  = ifelse(LastFire == 0, oldestyr-1, LastFire))
       calc1[[i]] <- data.frame(yrofas = yoa, TSLF = 1:(yoa-oldestyr+1)) %>%
-        mutate(fireYear = yrofas-TSLF,
+        mutate(LastFire = yrofas-TSLF,
                ExpectedPctMIN = 100* ((1-(1/input$tslfMIN))^(TSLF-1)) * (1/input$tslfMIN),
                ExpectedPctMEAN = 100* ((1-(1/input$tslfMEAN))^(TSLF-1)) * (1/input$tslfMEAN),
                ExpectedPctMAX = 100* ((1-(1/input$tslfMAX))^(TSLF-1)) * (1/input$tslfMAX)) %>%
-        full_join(raw[[i]], by = c(fireYear = "LastFire")) %>%
+        full_join(raw[[i]], by = "LastFire") %>%
         mutate_if(is.numeric,coalesce,0)
     }
 
@@ -120,7 +107,7 @@ server <- function(input, output){
     firereturn <- c(MIN = input$tslfMIN, MEAN = input$tslfMEAN, MAX = input$tslfMAX)
     grid <- expand_grid(1:length(data), 1:length(firereturn)) %>% t() %>% data.frame()
     
-    purrr::map(grid, ~TSLF_intervals(data[[.x[1]]] %>% select(Assessment_Year, fireYear, TSLF, ends_with("_Pct"), ExpectedArea = ends_with(names(firereturn[.x[2]]))), 
+    purrr::map(grid, ~TSLF_intervals(data[[.x[1]]] %>% select(yrofas, LastFire, TSLF, ends_with("_Pct"), ExpectedArea = ends_with(names(firereturn[.x[2]]))), 
                                      firereturn[.x[2]])) %>% 
       setNames(map_chr(grid, ~paste(names(data)[.x[1]], firereturn[.x[2]], sep = "_tslf"))) %>%
       bind_rows()
