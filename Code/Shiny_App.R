@@ -40,13 +40,17 @@ ui <- fluidPage(
     position = "left"
   ),
   
-  h5("For more information on the calculation of this Fire State metric please see \n
-  Tulloch, A.I.T., McDonald, J., Cosier, P., Sbrocchi, C., Stein, J., Lindenmayer, D., Possingham, H.P., 2018. \n Using ideal distributions of the time since habitat was disturbed to build metrics for evaluating landscape condition. Ecological Applications 28, 709-720."),
-  h6(tags$a(href="https://www.researchgate.net/publication/323461408_Using_ideal_distributions_of_the_time_since_habitat_was_disturbed_to_build_metrics_for_evaluating_landscape_condition", 
-                 title="Link to paper"))
-)
+  h5("For more information on the calculation of this Fire State metric please see the peer-reviewed paper"),
+  h5("Tulloch, A.I.T., McDonald, J., Cosier, P., Sbrocchi, C., Stein, J., Lindenmayer, D., Possingham, H.P., 2018. Using ideal distributions of the time since habitat was disturbed to build metrics for evaluating landscape condition. Ecological Applications 28, 709-720."),
+  uiOutput("link")
+ )
 
 server <- function(input, output){
+  
+  url <- a("Access paper", href="https://www.researchgate.net/publication/323461408_Using_ideal_distributions_of_the_time_since_habitat_was_disturbed_to_build_metrics_for_evaluating_landscape_condition")
+  output$link <- renderUI({
+    tagList("URL link:", url)
+  })
   
   dataInput1 <- reactive({  ## reads in the data and combines into one table
     req(input$data)
