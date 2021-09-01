@@ -25,18 +25,25 @@ ui <- fluidPage(
                    column(5, 
                           plotOutput(outputId = "freqCurves", width = "500px", height = "600px")),
                    column(3, 
-                          tableOutput(outputId = "Summary")),
+                          tableOutput(outputId = "Summary"), 
+                          downloadButton("download1", "Download .tsv")),
                    column(4, 
                           plotOutput(outputId = "areaGraph", width = "500px", height = "280px"), 
                           plotOutput(outputId = "ribbonPlot", width = "500px", height = "280px"))
                  )
         ),
         tabPanel("Detailed table", 
-                 tableOutput(outputId = "outTableB"))
+                 tableOutput(outputId = "outTableB"), 
+                 downloadButton("download2", "Download .tsv"))
       ),
       width = 10), 
     position = "left"
-  )
+  ),
+  
+  h5("For more information on the calculation of this Fire State metric please see \n
+  Tulloch, A.I.T., McDonald, J., Cosier, P., Sbrocchi, C., Stein, J., Lindenmayer, D., Possingham, H.P., 2018. \n Using ideal distributions of the time since habitat was disturbed to build metrics for evaluating landscape condition. Ecological Applications 28, 709-720."),
+  h6(tags$a(href="https://www.researchgate.net/publication/323461408_Using_ideal_distributions_of_the_time_since_habitat_was_disturbed_to_build_metrics_for_evaluating_landscape_condition", 
+                 title="Link to paper"))
 )
 
 server <- function(input, output){
@@ -59,18 +66,22 @@ server <- function(input, output){
   })
   
   
-  output$outTableB <- renderTable ({
+  outTable <- reactive({
     dataOutputB() %>% select(group, gi, interval, contains("Shortfall")) %>%
       rename_with(fix_names, contains("Shortfall")) %>%
       separate(group, into = c("Year", "TSLF"))
-  }, caption = "Shortfalls by tslf and assessment year")
+  })
+  
+  output$outTableB <- renderTable ({
+   outTable()
+  }, caption = "Fire State Metric [Similarity to ideal fire state (100 – summed shortfall)] for each Time-Since-Last-Fire Geometric Interval and Assessment Year", 
+  caption.placement = "top")
   
   output$Summary <- renderTable ({
-    dataOutputB() %>% select(group, gi, interval, contains("Shortfall")) %>% 
-      group_by(group) %>% summarise(across(contains("Shortfall"), sum)) %>% 
-      separate(group, into = c("Year", "TSLF")) %>%
-      rename_with(fix_names, contains("Shortfall"))
-  }, caption = "Total shortfall metric by tslf and assessment year")
+    outTable() %>% group_by(Year, TSLF) %>% 
+      summarise(across(where(is.double), sum))
+  }, caption =  "Final Fire State Metric [Similarity to ideal fire state (100 – summed shortfall)] by Time-Since-Last Fire (TSLF) and Assessment Year", 
+  caption.placement = "top")
   
   output$areaGraph <- renderPlot({
     dataOutputB() %>% area_graph()
@@ -79,6 +90,25 @@ server <- function(input, output){
   output$ribbonPlot <- renderPlot({
     dataOutputB() %>% ribbon_plot()
   })
+  
+  output$download1 <- downloadHandler(
+    filename = function() {
+       "Fire_State_Summary_Table.tsv"
+    },
+    content = function(file) {
+      vroom::vroom_write(outTable() %>% group_by(Year, TSLF) %>% 
+                           summarise(across(where(is.double), sum)), file)
+    }
+  )
+  
+  output$download2 <- downloadHandler(
+    filename = function() {
+      "Fire_State_Detailed_Table.tsv"
+    },
+    content = function(file) {
+      vroom::vroom_write(outTable(), file)
+    }
+  )
 }
 
 

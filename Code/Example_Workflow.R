@@ -47,15 +47,12 @@ dat <- expected_fire(FireHist, tslf) # obs and expected percentages
 shf <- shortfalls(dat, tslf) # shortfalls
 
 # detailed table (throws warning if only one observed column was input)
-shf %>% select(group, gi, interval, contains("Shortfall")) %>%
-  rename_with(fix_names, contains("Shortfall")) %>%
-  separate(group, into = c("Year", "TSLF"))
-
-# summary shortfall metric table
-shf %>% select(group, gi, interval, contains("Shortfall")) %>% 
-  group_by(group) %>% summarise(across(contains("Shortfall"), sum)) %>% 
-  separate(group, into = c("Year", "TSLF")) %>%
+outTable <- shf %>% select(group, gi, interval, contains("Shortfall")) %>%
+  separate(group, into = c("Year", "TSLF")) %>% 
   rename_with(fix_names, contains("Shortfall"))
+# summary shortfall metric table
+summaryTable <- outTable %>%
+  group_by(Year, TSLF) %>% summarise(across(where(is.double), sum))
 
 # Plot frequency curves
 freq_curves(dat, yr = 2015)

@@ -110,11 +110,11 @@ freq_curves <- function(dat, yr = 2020){
     pivot_longer(cols = contains("Pct"), names_to = "variable")
   
   colors <- c("#073b4c", "#06d6a0", "#ef476f", "#ffd166", "#118ab2")
-  colrs <- c("orange3", "orangered3", "red3", colors[1:(n_distinct(data$variable)-3)])
+  colrs <- c("orange", "deeppink", "darkorchid", colors[1:(n_distinct(data$variable)-3)])
   
   ggplot(data, aes(x = TSLF, y = value, col = variable)) + geom_line(lwd = 1.3) + 
     labs(y = "Percent of ecosystem extent") +
-    ggtitle(paste("Frequency curves for", yr)) + 
+    ggtitle(paste("Expected and observed time-since-fire frequency curves for", yr)) + 
     scale_color_manual(values = colrs) +
     theme(plot.title = element_text(size = 16, face = "bold"), legend.position = c(.2, 0.85))
 }
@@ -163,7 +163,7 @@ ribbon_plot <- function(dat){
     group_by(group) %>% summarise(across(contains("Shortfall"), sum)) %>%
     separate(group, into = c("Year", "TSLF")) %>% 
     pivot_longer(contains("Shortfall")) %>% 
-    mutate(Year = as.numeric(Year), TSLF = as.numeric(TSLF)) %>%
+    mutate(Year = as.numeric(Year), TSLF = as.numeric(TSLF), value = 100-value) %>%
     mutate(TSLF = ifelse(TSLF == min(TSLF), "Min", ifelse(TSLF == max(TSLF), "Max", "Mean"))) %>%
     pivot_wider(names_from = TSLF, values_from = value)
   if(n_distinct(outD$name)>1){
@@ -175,10 +175,10 @@ ribbon_plot <- function(dat){
     geom_ribbon(aes(ymin = Min, ymax = Max), alpha = 0.5, lwd = 0) +
     geom_point(aes(y = Mean, col = name), pch = 16) + 
     geom_line(aes(y = Mean, col = name), lwd = 1) +
-    labs(y = "Shortfall metric", x = "Year of condition assessment", fill = "", col = "") + 
+    labs(y = "Similarity to ideal fire state (100 – summed shortfall)", x = "Year of fire state assessment", fill = "", col = "") + 
     scale_fill_manual(values = colrs) +
     scale_color_manual(values = colrs) +
-    ggtitle("Ecosystem total shortfall") + 
+    ggtitle("Ecosystem fire state over time") + 
     theme(plot.title = element_text(size = 16, face = "bold"))
   
 }
