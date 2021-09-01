@@ -114,7 +114,7 @@ freq_curves <- function(dat, yr = 2020){
   
   ggplot(data, aes(x = TSLF, y = value, col = variable)) + geom_line(lwd = 1.3) + 
     labs(y = "Percent of ecosystem extent") +
-    ggtitle(paste("Expected and observed time-since-fire frequency curves for", yr)) + 
+    ggtitle(paste("Expected and observed time-since-fire \n frequency curves for", yr)) + 
     scale_color_manual(values = colrs) +
     theme(plot.title = element_text(size = 16, face = "bold"), legend.position = c(.2, 0.85))
 }

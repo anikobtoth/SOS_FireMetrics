@@ -17,6 +17,8 @@ ui <- fluidPage(
       numericInput("tslfMIN", "Min TSLF", value = 6),
       numericInput("tslfMEAN", "Mean TSLF", value = 7),
       numericInput("tslfMAX", "Max TSLF", value = 15), 
+      selectInput("year", "Display frequency curves for year", c(2020, 2015, 2010)),
+      submitButton(text = "Submit", icon = NULL, width = NULL),
       width = 2),
     mainPanel(
       tabsetPanel(
@@ -47,10 +49,21 @@ ui <- fluidPage(
 
 server <- function(input, output){
   
-  url <- a("Access paper", href="https://www.researchgate.net/publication/323461408_Using_ideal_distributions_of_the_time_since_habitat_was_disturbed_to_build_metrics_for_evaluating_landscape_condition")
+  url <- a("here", href="https://www.researchgate.net/publication/323461408_Using_ideal_distributions_of_the_time_since_habitat_was_disturbed_to_build_metrics_for_evaluating_landscape_condition")
   output$link <- renderUI({
-    tagList("URL link:", url)
+    tagList("Access paper", url)
   })
+  
+  assessYears <- reactive({  ## reads in the data and combines into one table
+    req(input$data)
+    years <- input$data$datapath[1] %>% read_csv() %>%
+      pull(Assessment_Year) %>% unique()
+    return(years)
+  })
+  
+  observeEvent(input$data, {
+    updateSelectInput(inputId = "year", choices = assessYears())
+  })  
   
   dataInput1 <- reactive({  ## reads in the data and combines into one table
     req(input$data)
@@ -61,7 +74,7 @@ server <- function(input, output){
   })
   
   output$freqCurves <- renderPlot({
-    dataInput1() %>% freq_curves(yr = 2020)})
+    dataInput1() %>% freq_curves(yr = input$year)})
   
   dataOutputB <- reactive({  ## calculate shortfalls
     data <- dataInput1()
