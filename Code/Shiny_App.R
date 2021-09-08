@@ -17,21 +17,24 @@ ui <- fluidPage(
       numericInput("tslfMIN", "Min TSLF", value = 6),
       numericInput("tslfMEAN", "Mean TSLF", value = 7),
       numericInput("tslfMAX", "Max TSLF", value = 15), 
-      selectInput("year", "Display frequency curves for year", c(2020, 2015, 2010)),
+      selectInput("year", "Display frequency curves for year", c(2020)),
       submitButton(text = "Submit", icon = NULL, width = NULL),
       width = 2),
     mainPanel(
       tabsetPanel(
         tabPanel("Summaries",
                  fluidRow(
-                   column(5, 
-                          plotOutput(outputId = "freqCurves", width = "500px", height = "600px")),
-                   column(3, 
-                          tableOutput(outputId = "Summary"), 
-                          downloadButton("download1", "Download .tsv")),
                    column(4, 
-                          plotOutput(outputId = "areaGraph", width = "500px", height = "280px"), 
-                          plotOutput(outputId = "ribbonPlot", width = "500px", height = "280px"))
+                          plotOutput(outputId = "freqCurves", width = "500px", height = "600px")),
+                   column(8, 
+                          tableOutput(outputId = "Summary"), 
+                          downloadButton("download1", "Download .tsv"))
+                 ),
+                 fluidRow(
+                   column(4, 
+                          plotOutput(outputId = "ribbonPlot")),
+                   column(8, 
+                          plotOutput(outputId = "areaGraph"))
                  )
         ),
         tabPanel("Detailed table", 
