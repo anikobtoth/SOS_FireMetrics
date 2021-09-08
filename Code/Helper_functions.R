@@ -11,35 +11,60 @@ pair_diff <- function(x, y){
   rbind(y, x) %>% st_difference(quiet = TRUE)
 }
 
-firehistory <- function(ecosystem, fire, assess_year){
+firehistory <- function(ecosystem, assess_year, fire = NULL){
   # Australian albers EA projection
   AEA_Aus <- "+proj=aea +lat_1=-18 +lat_2=-36 +lat_0=0 +lon_0=132 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
   
+  message("processing ecosystem data")
   ecosystem <- st_transform(ecosystem, st_crs(AEA_Aus)) %>% # transform
     st_make_valid() %>% st_union()                          # validate and lump to one multipolygon
   
-  fire <- st_transform(fire, st_crs(AEA_Aus)) %>%          # transform
-    mutate(FireAge = as.numeric(substr(Label, 0, 4))) %>%  # Add FireAge as numeric
-    filter(FireAge < assess_year) %>%                      # Filter to before assessment year
-    st_make_valid() %>%                                    # Validate
+  processed <- FALSE
+  
+  if(is.null(fire)) {
+    if(assess_year %in% c(2020:2015, 2010, 2005, 2000)){    # pre-processed layer available
+      message(paste0("preprocessed fire layer available for year ", assess_year))
+      fire <- readRDS(paste0("./Data/FireHist_max", assess_year, ".rds"))
+      processed <- TRUE
+    }else{
+      message(paste0("processing fire history for year ", assess_year))
+      fire <- readRDS("./Data/FireHistoryNSW.rds") %>%         # Raw layer for processing
+        mutate(FireAge = as.numeric(substr(Label, 0, 4))) %>%  # Add FireAge as numeric
+        filter(FireAge < assess_year)                          # Filter to before assessment year
+    }
+  }else{
+    fire <- st_transform(fire, st_crs(AEA_Aus)) %>% 
+      mutate(FireAge = as.numeric(substr(Label, 0, 4))) %>%  # Add FireAge as numeric
+      filter(FireAge < assess_year)                          # Filter to before assessment year
+  }
+  
+         
+    fire <- st_make_valid(fire) %>%                        # Validate
     st_crop(st_bbox(ecosystem)) %>%                        # crop to ecosystem extent (to reduce processing)
     group_by(FireAge) %>%                                  # union polygons from same FireAge
     summarize(geometry = st_union(geometry)) %>%
     st_snap_to_grid(1) %>% st_make_valid()                  # snap to grid and validate
   
-  fire_diff <- fire %>% split(.$FireAge) %>% 
-    reduce(pair_diff)
-  
-  areas <- st_intersection(fire_diff, ecosystem) 
-  
-  
-  unburned <- as.numeric((st_area(ecosystem) - (st_union(areas) %>% st_area()))/1000000)
-  
-  out <- areas %>% mutate(ObsAreaKm2 = as.numeric(st_area(areas)/1000000)) %>% 
-    tibble() %>% dplyr::select(LastFire = FireAge, ObsAreaKm2) %>% 
-    rbind(data.frame(LastFire = 0, ObsAreaKm2 = unburned)) %>% 
-    mutate(Assessment_Year = assess_year)
-  
+  if(nrow(fire) > 0){ # if fire overlaps ecosystem
+    if(processed){
+      fire_diff <- fire
+    }else{
+      fire_diff <- fire %>% split(.$FireAge) %>% reduce(pair_diff)}
+    
+    areas <- st_intersection(fire_diff, ecosystem) 
+    unburned <- as.numeric((st_area(ecosystem) - (st_union(areas) %>% st_area()))/1000000)
+    
+    out <- areas %>% mutate(ObsAreaKm2 = as.numeric(st_area(areas)/1000000)) %>% 
+      tibble() %>% dplyr::select(LastFire = FireAge, ObsAreaKm2) %>% 
+      rbind(data.frame(LastFire = 0, ObsAreaKm2 = unburned)) %>% 
+      mutate(Assessment_Year = assess_year)
+    
+  }else{ # in case fire does not overlap ecosystem
+    out <- data.frame(LastFire = 0, 
+                      ObsAreaKm2 = as.numeric(st_area(ecosystem)/1000000), 
+                      Assessment_Year = assess_year)
+  }
+
   return(out)
 }
 
@@ -84,9 +109,9 @@ expected_fire <- function(input_data, tslf){
     raw[[i]] <- raw[[i]] %>% mutate(LastFire  = ifelse(LastFire == 0, oldestyr-1, LastFire))
     calc1[[i]] <- data.frame(yrofas = yoa, TSLF = 1:(yoa-oldestyr+1)) %>%
       mutate(LastFire = yrofas-TSLF,
-             ExpectedPctMIN = 100* ((1-(1/tslf["MIN"]))^(TSLF-1)) * (1/tslf["MIN"]),
-             ExpectedPctMEAN = 100* ((1-(1/tslf["MEAN"]))^(TSLF-1)) * (1/tslf["MEAN"]),
-             ExpectedPctMAX = 100* ((1-(1/tslf["MAX"]))^(TSLF-1)) * (1/tslf["MAX"])) %>%
+             Expected_MIN_Pct = 100* ((1-(1/tslf["MIN"]))^(TSLF-1)) * (1/tslf["MIN"]),
+             Expected_MEAN_Pct = 100* ((1-(1/tslf["MEAN"]))^(TSLF-1)) * (1/tslf["MEAN"]),
+             Expected_MAX_Pct = 100* ((1-(1/tslf["MAX"]))^(TSLF-1)) * (1/tslf["MAX"])) %>%
       full_join(raw[[i]], by = "LastFire") %>%
       mutate_if(is.numeric,coalesce,0) %>% dplyr::select(-Assessment_Year)
   }
@@ -96,7 +121,7 @@ expected_fire <- function(input_data, tslf){
 shortfalls <- function(data, firereturn){
   grid <- expand_grid(1:length(data), 1:length(firereturn)) %>% t() %>% data.frame()
   
-  purrr::map(grid, ~TSLF_intervals(data[[.x[1]]] %>% select(yrofas, LastFire, TSLF, ends_with("_Pct"), ExpectedArea = ends_with(names(firereturn[.x[2]]))), 
+  purrr::map(grid, ~TSLF_intervals(data[[.x[1]]] %>% select(yrofas, LastFire, TSLF, ends_with("_Pct"), ExpectedArea = contains(names(firereturn[.x[2]]))), 
                                    firereturn[.x[2]])) %>% 
     setNames(map_chr(grid, ~paste(names(data)[.x[1]], firereturn[.x[2]], sep = "_tslf"))) %>%
     bind_rows()
@@ -107,7 +132,9 @@ shortfalls <- function(data, firereturn){
 
 freq_curves <- function(dat, yr = 2020){
   data <- dat %>% bind_rows() %>% filter(yrofas == yr) %>% 
-    pivot_longer(cols = contains("Pct"), names_to = "variable")
+    select(yrofas, TSLF, LastFire, contains("Pct")) %>%
+    rename_with(fix_names, contains("_Pct")) %>% 
+    pivot_longer(cols = !1:3, names_to = "variable")
   
   colors <- c("#073b4c", "#06d6a0", "#ef476f", "#ffd166", "#118ab2")
   colrs <- c("orange", "deeppink", "darkorchid", colors[1:(n_distinct(data$variable)-3)])
@@ -116,7 +143,7 @@ freq_curves <- function(dat, yr = 2020){
     labs(y = "Percent of ecosystem extent") +
     ggtitle(paste("Expected and observed time-since-fire \n frequency curves for", yr)) + 
     scale_color_manual(values = colrs) +
-    theme(plot.title = element_text(size = 16, face = "bold"), legend.position = c(.2, 0.85))
+    theme(plot.title = element_text(size = 16, face = "bold"), legend.position = c(0.5, .6))
 }
 
 area_graph <- function(dat){
@@ -129,7 +156,7 @@ area_graph <- function(dat){
     filter(!(name == "ExpectedArea" & Year != 2020))
   
   p1 <- ggplot(outC %>% filter(name != "ExpectedArea"), aes(x = x, y = value, fill = as.factor(gi), group = TSLF)) + 
-    geom_col(width = 3) + 
+    geom_col() + 
     facet_grid(~name, scales = "free") +
     scale_fill_viridis(discrete = T, name = "", labels = unique(outC$interval), option = "B") +
     labs(x = "Observed year", y = "Percent burned (%)") + 
@@ -175,7 +202,7 @@ ribbon_plot <- function(dat){
     geom_ribbon(aes(ymin = Min, ymax = Max), alpha = 0.5, lwd = 0) +
     geom_point(aes(y = Mean, col = name), pch = 16) + 
     geom_line(aes(y = Mean, col = name), lwd = 1) +
-    labs(y = "Similarity to ideal fire state (100 – summed shortfall)", x = "Year of fire state assessment", fill = "", col = "") + 
+    labs(y = "Similarity to ideal fire state (100 - summed shortfall)", x = "Year of fire state assessment", fill = "", col = "") + 
     scale_fill_manual(values = colrs) +
     scale_color_manual(values = colrs) +
     ggtitle("Ecosystem fire state over time") + 
